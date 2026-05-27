@@ -1,137 +1,109 @@
-# BRAHMO Compliance Dashboard
+# BRAHMO Compliance Engine
 
-**Assessment 6 — Ethical Walls + Audit Trail + Compliance Export**
+## Setup
 
-A compliance engine that makes law firms regulator-ready. Every AI session audited. Every cross-client access blocked and logged. Every output reviewed before it reaches a filing. Exportable. Provable. Tamper-proof.
-
----
-
-## Quick Start
-
-### 1. Prerequisites
-- Node.js v18+
-- A free [Supabase](https://supabase.com) account
-
-### 2. Clone & Install
+### 1. Install dependencies
 ```bash
-cd "E:\assesment 6"
 npm install
 ```
 
-### 3. Set up Supabase
-1. Create a project at [supabase.com](https://supabase.com) → name it `brahmo-compliance`
-2. Go to **Settings → API** and copy:
-   - Project URL
-   - `anon` key
-   - `service_role` key (scroll down, click Reveal)
-3. Copy `.env.local.example` → `.env.local` and fill in your keys
-
-### 4. Run the database schema
-In the Supabase **SQL Editor**, run in order:
-```
-supabase/schema.sql   ← Creates tables + RLS policies + REVOKE
-supabase/seed.sql     ← Inserts all demo data
-```
-
-### 5. Start the app
+### 2. Configure environment
 ```bash
-npm run dev   # → http://localhost:3000
+cp .env.local.example .env.local
+```
+Fill in:
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+```
+
+### 3. Run schema in Supabase SQL Editor
+Open `supabase/schema.sql` → paste into Supabase SQL Editor → Run
+
+### 4. Create 4 Auth Users in Supabase Dashboard
+Go to **Authentication → Users → Add User** for each:
+```
+sharma@firm.com  / Test1234!
+priya@firm.com   / Test1234!
+rahul@firm.com   / Test1234!
+sonia@firm.com   / Test1234!
+```
+
+### 5. Sync UUIDs in seed.sql
+After creating auth users, copy their UUIDs from the Auth panel.
+Open `supabase/seed.sql` and replace:
+```
+SHARMA_UUID, PRIYA_UUID, RAHUL_UUID, SONIA_UUID
+```
+with the real UUIDs.
+
+### 6. Run seed data
+Open `supabase/seed.sql` → paste into SQL Editor → Run
+
+### 7. Start the app
+```bash
+npm run dev
+```
+Open http://localhost:3000
+
+---
+
+## Demo Script (5 Steps)
+
+**Step 1 — Normal Access**
+Switch to Priya → Sessions tab
+Expected: sees sessions for Matter 1 and Matter 2 only
+
+**Step 2 — Ethical Wall Blocking**
+As Priya → open browser console or Blocked Access tab (switch to Partner first)
+POST `/api/access-check` with `{ matterId: 'matter_3' }`
+Expected: `{ status: 'BLOCKED' }` + new row in `blocked_access_log`
+
+**Step 3 — Isolation Proof (Sonia Test)**
+Switch to Sonia → Sessions tab and Matters list
+Expected: sees Matter 1 only — NOT Matter 2 (same client, different permission)
+
+**Step 4 — Review Chain**
+Switch to Partner → Review Queue tab
+Find a pending session → add notes → click Approve
+Expected: session `review_status` updates to `'reviewed'` in database
+
+**Step 5 — Compliance Export**
+As Partner → Export tab
+Set date range → click Export Compliance CSV
+Open downloaded file
+Expected: client names show as `'Client A'`, `'Client B'` — no real names
+
+---
+
+## SQL Proofs for Evaluators
+
+Run these in Supabase SQL Editor during the demo:
+
+```sql
+-- 1. Confirm RLS is enabled
+SELECT tablename, rowsecurity
+FROM pg_tables WHERE schemaname = 'public';
+
+-- 2. Show active policies
+SELECT policyname, tablename, cmd, qual
+FROM pg_policies WHERE schemaname = 'public';
+
+-- 3. Prove blocked_access_log is immutable (this must fail)
+DELETE FROM blocked_access_log LIMIT 1;
+-- Expected: ERROR: permission denied for table blocked_access_log
+
+-- 4. Prove matter-level isolation
+-- Log in as sonia@firm.com, then in SQL Editor with her session:
+SELECT * FROM matters;
+-- Returns: matter_1 only
 ```
 
 ---
 
-## Architecture Overview
+## Innovation: Review SLA Tracker
 
-See [`docs/architecture.md`](./docs/architecture.md) for full RLS design decisions.
-
-### Key Principle: Database-enforced isolation
-```
-matter_permissions table
-       │
-       ▼ RLS policy checks this
-matters ──────────────┐
-ai_sessions ──────────┤  Users can ONLY see rows where
-blocked_access_log ───┘  their user_id appears in matter_permissions
-```
-
-### The 5-Step Demo
-| Step | Who | Action | Expected |
-|------|-----|--------|----------|
-| 1 | Priya | Access Matter 1 | ✅ CLEAR — session recorded |
-| 2 | Priya | Access Matter 3 | 🚫 BLOCKED — empty result, event logged |
-| 3 | Rahul | List matters | Only Matter 3 returned — zero rows for 1 & 2 |
-| 4 | Partner | Review Priya's session | Review chain recorded |
-| 5 | Partner | Export CSV | Anonymized, includes blocked event |
-
----
-
-## Project Structure
-
-```
-brahmo-compliance/
-├── README.md
-├── .env.local.example
-├── src/
-│   ├── app/
-│   │   ├── page.tsx              ← Main dashboard
-│   │   └── api/
-│   │       ├── access-check/     ← Ethical wall check
-│   │       ├── sessions/         ← Session lifecycle
-│   │       ├── review/           ← Partner review
-│   │       ├── export/           ← CSV download
-│   │       ├── matters/          ← Accessible matters
-│   │       ├── stats/            ← Dashboard metrics
-│   │       └── blocked-log/      ← Blocked events
-│   ├── lib/
-│   │   ├── supabase.ts           ← Anon + admin clients
-│   │   ├── ethical-wall.ts       ← checkAccess + BLOCKED logging
-│   │   ├── audit-trail.ts        ← Session recording + review chain
-│   │   ├── compliance-export.ts  ← CSV + anonymization
-│   │   └── types.ts              ← TypeScript interfaces
-│   └── components/
-│       ├── Dashboard.tsx         ← Main UI
-│       ├── SessionList.tsx
-│       ├── BlockedAccessLog.tsx
-│       ├── UserSwitcher.tsx
-│       ├── ReviewPanel.tsx
-│       └── ExportButton.tsx
-├── supabase/
-│   ├── schema.sql                ← Tables + RLS + REVOKE
-│   └── seed.sql                  ← Demo data
-└── docs/
-    └── architecture.md
-```
-
----
-
-## Demo Users
-
-| User | Role | Accessible Matters |
-|------|------|-------------------|
-| Advocate Sharma | Partner | All 3 matters |
-| Priya Mehta | Associate | Matter 1, 2 (Client A) |
-| Rahul Singh | Associate | Matter 3 (Client B) |
-| Sonia Das | Paralegal | Matter 1 only |
-
-Switch between users via the dropdown — each switch changes the data scope live.
-
----
-
-## Submission Checklist
-
-- [x] `README.md` with setup instructions
-- [x] `.env.local.example` (placeholder values)
-- [x] `supabase/schema.sql` — tables + RLS policies + REVOKE
-- [x] `supabase/seed.sql` — all seed data
-- [x] All 5 demo steps work with real Supabase queries
-- [x] RLS policies are database-enforced (show SQL in `schema.sql`)
-- [x] `blocked_access_log` is truly append-only (REVOKE in `schema.sql`)
-- [x] Denied access returns EMPTY result (not error)
-- [x] Compliance export CSV has anonymized client names
-- [x] Export includes blocked access events
-- [x] Dashboard shows meaningful metrics
-- [x] User switcher works for all 4 users
-- [x] Sonia sees Matter 1 but NOT Matter 2
-- [x] Partner sessions are audited (nobody exempt)
-- [ ] Clean git history
-- [x] `docs/architecture.md` explains RLS design decisions
+Sessions pending review for more than 48 hours are flagged in red
+on the Sessions dashboard. This reflects real compliance requirements
+where AI output must be reviewed within a defined window.
