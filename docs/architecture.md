@@ -1,114 +1,78 @@
-# Architecture: RLS Design Decisions
+# BRAHMO Compliance Engine — Architecture
 
-## Why Database-Level, Not Application-Level
+## 1. Why Row Level Security Over Application Checks
 
-The ethical wall is enforced at the **PostgreSQL Row Level Security** layer — not in API route `if` statements.
+Application-level checks (e.g., `if (user.role === 'partner') return data`) can be bypassed by bugs in route handlers, missing middleware, or direct database access granted to a compromised service account. PostgreSQL RLS enforces access at the data layer — the policy runs inside the database engine on every query, regardless of how the query arrives. Even if all API code is deleted or bypassed, the database still returns zero rows for unauthorized queries. This means the security guarantee is not dependent on any application code being correct.
 
-**The problem with application-level checks:**
-```
-API Route:
-  if (userId === 'user_priya' && matterId === 'matter_1') → allow
-  else → block
-```
-A single bug (wrong variable, off-by-one, null check failure) leaks data. The database sees everything — it's the last line of defence that can't be bypassed by code bugs.
-
-**The RLS solution:**
 ```sql
-CREATE POLICY "Users see own matters" ON matters
+CREATE POLICY "matters_select" ON matters
   FOR SELECT USING (
-    id IN (
-      SELECT matter_id FROM matter_permissions
-      WHERE user_id = auth.uid()
-    )
+    id IN (SELECT matter_id FROM matter_permissions WHERE user_id = auth.uid())
   );
 ```
-Even if the API has a bug that passes the wrong `user_id`, the database evaluates the policy independently. An unauthorized query returns **zero rows** — not an error, not a partial result. Zero.
 
 ---
 
-## Table Design
+## 2. Ethical Wall: How BLOCKED Access Works
 
-### `matter_permissions` — the source of truth
-Every access decision derives from one table:
-```
-user_id | matter_id | permission_level | granted_by
-```
-To give Priya access to a new matter: `INSERT INTO matter_permissions`. No code changes. No restart. RLS immediately enforces.
+When a user attempts to access a matter, `checkAccess()` in `src/lib/ethical-wall.ts` queries `matter_permissions` for the exact `(userId, matterId)` pair.
 
-### `blocked_access_log` — append-only evidence
+- If no matching row exists: access status is `BLOCKED`
+- The blocked attempt is immediately logged to `blocked_access_log` with reason, user ID, and attempted matter ID
+- The API route (`/api/access-check`) always returns HTTP **200** with `{ status: 'BLOCKED' }`
+- It never returns **403** or **404**
+
+Returning 403 or 404 would confirm to the requester that a matter exists (or does not) — leaking information across the ethical wall. By returning 200 with a generic `BLOCKED` status, the API gives no signal about whether the matter ID is valid, what client it belongs to, or why access was denied. This is called **security through obscurity at the API boundary**: the boundary itself reveals nothing.
+
+---
+
+## 3. Immutable Audit Log
+
+The `blocked_access_log` table is made append-only at the PostgreSQL level by revoking modification privileges:
+
 ```sql
 REVOKE UPDATE, DELETE ON blocked_access_log FROM authenticated;
 REVOKE UPDATE, DELETE ON blocked_access_log FROM anon;
 ```
-This is not a suggestion — it's a `REVOKE` at the PostgreSQL privilege level. Even a Supabase admin running SQL cannot `UPDATE` or `DELETE` from this table. The log is immutable evidence for the SRA.
 
-### `ai_sessions` — privacy-preserving audit trail
-The `output_hash` column stores `SHA256(rawOutput)`. The full output text is **never stored**. This means:
-- Regulators can verify the output wasn't modified (hash check)
-- Real client communications aren't exposed in the export
-- Attorney-client privilege is preserved in the compliance CSV
+If anyone — including a database administrator using the anon or authenticated role — attempts to remove a record:
+
+```sql
+DELETE FROM blocked_access_log WHERE event_id = 'x';
+-- ERROR: permission denied for table blocked_access_log
+```
+
+`INSERT` still works, so the logging mechanism continues to function. The result is a tamper-proof record: once an unauthorized access attempt is logged, it cannot be deleted or modified to cover tracks. Even a user who later gains elevated privileges cannot retroactively erase their blocked access history.
 
 ---
 
-## RLS Policy Breakdown
+## 4. Audit Trail: Output Hash Not Full Text
 
-### matters
-```sql
-FOR SELECT USING (
-  id IN (SELECT matter_id FROM matter_permissions WHERE user_id = auth.uid())
-)
-```
-- Priya → sees only `matter_1`, `matter_2`
-- Rahul → sees only `matter_3`
-- Partner → sees all 3 (has rows in `matter_permissions` for each)
-- Sonia → sees only `matter_1` (not `matter_2` — matter-level, not client-level)
+`ai_sessions` stores `output_hash` (a SHA-256 digest of the AI output) rather than the full text of the AI response.
 
-### ai_sessions
-```sql
-FOR SELECT USING (
-  matter_id IN (SELECT matter_id FROM matter_permissions WHERE user_id = auth.uid())
-)
-```
-Sessions are scoped to the same permission table. If Priya's access to Matter 1 is revoked, her old sessions for Matter 1 also become invisible.
-
-### blocked_access_log
-```sql
-FOR INSERT WITH CHECK (true);             -- Anyone can log
-FOR SELECT USING (role = 'partner');      -- Only partners can read
-REVOKE UPDATE, DELETE FROM authenticated; -- Nobody can modify
-```
+- **Why not store full output:** AI-generated legal drafts, research memos, and review notes may contain attorney-client privileged content. Storing them in a compliance log creates a secondary exposure risk.
+- **What the hash provides:** A reviewer can take the AI output from the user's local environment, hash it, and compare it to `output_hash` in the database. If they match, the output was not tampered with after the session ended.
+- **Regulatory use case:** If a regulator asks "was this AI output altered before submission?", the hash comparison answers the question definitively — without requiring access to the underlying privileged text.
 
 ---
 
-## User Switcher Approach (Option A)
+## 5. Matter-Level Isolation (Sonia Test)
 
-We use the **service_role admin client** server-side, manually filtering by `user_id` in every query. This mirrors RLS enforcement while keeping the demo simple.
+Client A has two active matters:
 
-In production:
-- Replace with Supabase Auth (real JWTs)
-- Each user logs in — `auth.uid()` is populated automatically
-- The RLS policies work identically without any code changes
+| Matter ID  | Matter Name                        |
+|------------|------------------------------------|
+| `matter_1` | Rajesh Kumar — Anticipatory Bail   |
+| `matter_2` | Rajesh Kumar — Property Dispute    |
 
----
+Sonia (paralegal) has a `matter_permissions` entry for `matter_1` only. She has no entry for `matter_2`, even though both matters belong to the same client.
 
-## Edge Cases Handled
-
-| Edge | How |
-|------|-----|
-| Sonia + Matter 2 | `matter_permissions` has no row — zero result |
-| Partner audited | Partner sessions INSERT into `ai_sessions` like everyone else |
-| New matter/user | `INSERT into matter_permissions` → RLS enforces immediately |
-| Revoking access | `DELETE from matter_permissions` → old sessions also invisible |
-| UPDATE on blocked_log | PostgreSQL REVOKE → `permission denied` |
-
----
-
-## Innovation: Hash-Chain Logging (Proposed)
-
-To detect even a malicious database admin who drops and recreates the table:
+When Sonia queries the database (via the RLS-enforced anon client):
 
 ```sql
-ALTER TABLE blocked_access_log ADD COLUMN prev_hash TEXT;
+SELECT * FROM matters;
+-- Returns: only matter_1
+-- matter_2 is invisible even though same client
 ```
 
-Each INSERT includes `SHA256(previous_row_id || previous_timestamp || ...)`. A missing or modified record breaks the chain — detectable by any auditor replaying the log. This is forensic-grade tamper detection beyond mere append-only.
+This works because the RLS policy checks `matter_id` in `matter_permissions` — not `client_id`. There is no concept of "if you can see one matter for a client, you can see all their matters." Each matter is independently permissioned. This proves the system enforces **matter-level isolation**, not client-level isolation, which is the correct model for legal ethical walls.
