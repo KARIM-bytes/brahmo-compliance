@@ -3,16 +3,18 @@
 // ============================================================
 // components/UserSwitcher.tsx
 //
-// Demo user switcher dropdown — changes which user's perspective
-// the dashboard shows. In real auth this would be Supabase Auth.
-//
-// Each user switch re-fetches all data as that user, so RLS
-// filtering is demonstrated live during the 5-step scenario.
+// Demo user switcher — signs in via Supabase Auth using
+// signInWithPassword so auth.uid() is a real JWT identity.
+// Each switch: signOut current session, signIn as new user.
+// This makes RLS policies using auth.uid() work natively.
 // ============================================================
 
-import { User } from '@/lib/types';
+import { supabase } from '@/lib/supabase';
+import type { User } from '@/lib/types';
 
-// Hard-coded demo users — in production these come from Supabase Auth
+// Demo accounts — passwords set during Supabase Auth setup (see README)
+const DEMO_PASSWORD = 'Test1234!';
+
 export const DEMO_USERS: User[] = [
   { id: 'user_partner', name: 'Advocate Sharma (Partner)', email: 'sharma@firm.com', role: 'partner',   sra_number: 'SRA-001', created_at: '' },
   { id: 'user_priya',   name: 'Priya Mehta (Associate)',   email: 'priya@firm.com',  role: 'associate', sra_number: 'SRA-002', created_at: '' },
@@ -26,7 +28,26 @@ interface UserSwitcherProps {
 }
 
 export default function UserSwitcher({ currentUserId, onSwitch }: UserSwitcherProps) {
-  const currentUser = DEMO_USERS.find((u) => u.id === currentUserId);
+  const currentDemo = DEMO_USERS.find((u) => u.id === currentUserId);
+
+  async function handleChange(email: string) {
+    // 1. Sign out current session
+    await supabase.auth.signOut();
+
+    // 2. Sign in as selected demo user — this sets auth.uid() in every RLS check
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password: DEMO_PASSWORD,
+    });
+
+    if (error || !data.user) {
+      console.error('[UserSwitcher] signInWithPassword failed:', error?.message);
+      return;
+    }
+
+    // 3. Notify parent with the real auth UUID so fetchData uses the right identity
+    onSwitch(data.user.id);
+  }
 
   return (
     <div className="user-switcher">
@@ -35,21 +56,23 @@ export default function UserSwitcher({ currentUserId, onSwitch }: UserSwitcherPr
       </label>
       <select
         id="user-select"
-        value={currentUserId}
-        onChange={(e) => onSwitch(e.target.value)}
+        value={currentDemo?.email ?? ''}
+        onChange={(e) => handleChange(e.target.value)}
         className="user-switcher__select"
       >
         {DEMO_USERS.map((u) => (
-          <option key={u.id} value={u.id}>
+          <option key={u.id} value={u.email}>
             {u.name}
           </option>
         ))}
       </select>
-      <span className="user-switcher__badge user-switcher__badge--{currentUser?.role}">
-        {currentUser?.role?.toUpperCase()}
-      </span>
+      {currentDemo && (
+        <span className={`user-switcher__badge user-switcher__badge--${currentDemo.role}`}>
+          {currentDemo.role.toUpperCase()}
+        </span>
+      )}
 
-      {/* Demo indicator — makes clear this is not real auth */}
+      {/* Indicates demo credentials are in use */}
       <span className="user-switcher__demo-tag">⚠️ DEMO MODE</span>
     </div>
   );

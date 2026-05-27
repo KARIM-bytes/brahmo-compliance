@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { User, AiSession, BlockedAccessEvent, DashboardStats, ReviewDecision } from '@/lib/types'
-import UserSwitcher, { DEMO_USERS } from '@/components/UserSwitcher'
+import UserSwitcher from '@/components/UserSwitcher'
 import SessionList from '@/components/SessionList'
 import BlockedAccessLog from '@/components/BlockedAccessLog'
 import ReviewPanel from '@/components/ReviewPanel'
@@ -90,7 +90,16 @@ export default function Home() {
   }
 
   useEffect(() => {
-    fetchData(DEMO_USERS[0].id)
+    // On mount, check for an existing Supabase Auth session
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) {
+        fetchData(data.user.id)
+      } else {
+        // No session — show the user switcher which will sign in
+        setCurrentUser(null)
+        setLoading(false)
+      }
+    })
   }, [])
 
   const roleBadgeClass: Record<string, string> = {
@@ -99,11 +108,15 @@ export default function Home() {
     paralegal: 'bg-green-600',
   }
 
+  const isPartner = currentUser?.role === 'partner'
+
   const tabs: { key: typeof activeTab; label: string }[] = [
     { key: 'sessions', label: 'Sessions' },
-    { key: 'blocked',  label: 'Blocked Access' },
-    { key: 'review',   label: 'Review Queue' },
-    { key: 'export',   label: 'Export' },
+    ...(isPartner ? [
+      { key: 'blocked' as const, label: 'Blocked Access' },
+      { key: 'review'  as const, label: 'Review Queue' },
+      { key: 'export'  as const, label: 'Export' },
+    ] : []),
   ]
 
   if (loading && !currentUser) {

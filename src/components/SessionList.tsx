@@ -34,6 +34,15 @@ export default function SessionList({
     );
   }
 
+  const SLA_HOURS = 48;
+
+  function isSlaBreached(session: AiSession): boolean {
+    if (session.review_status !== 'pending') return false;
+    const started = new Date(session.session_start).getTime();
+    const hoursElapsed = (Date.now() - started) / (1000 * 60 * 60);
+    return hoursElapsed > SLA_HOURS;
+  }
+
   return (
     <div className="session-list">
       <table className="session-table">
@@ -49,38 +58,49 @@ export default function SessionList({
           </tr>
         </thead>
         <tbody>
-          {sessions.map((s) => (
-            <tr key={s.id} className={`session-row session-row--${s.review_status}`}>
-              <td>{new Date(s.session_start).toLocaleDateString()}</td>
-              <td>{s.user_id}</td>
-              <td>{s.matter_id}</td>
-              <td>
-                <span className={`badge badge--${s.query_type}`}>
-                  {s.query_type}
-                </span>
-              </td>
-              <td className="session-row__hash">
-                <code>{s.output_hash?.slice(0, 12) ?? '—'}…</code>
-              </td>
-              <td>
-                <StatusBadge status={s.review_status} />
-              </td>
-              {showReviewDetails && (
+          {sessions.map((s) => {
+            const sla = isSlaBreached(s);
+            return (
+              <tr
+                key={s.id}
+                className={`session-row session-row--${s.review_status}${sla ? ' session-row--sla-breach' : ''}`}
+              >
+                <td>{new Date(s.session_start).toLocaleDateString()}</td>
+                <td>{s.user_id}</td>
+                <td>{s.matter_id}</td>
                 <td>
-                  {s.reviewer_id ? (
-                    <>
-                      <strong>{s.reviewer_id}</strong> — {s.review_decision}
-                      {s.review_notes && (
-                        <p className="session-row__notes">{s.review_notes}</p>
-                      )}
-                    </>
-                  ) : (
-                    '—'
+                  <span className={`badge badge--${s.query_type}`}>
+                    {s.query_type}
+                  </span>
+                </td>
+                <td className="session-row__hash">
+                  <code>{s.output_hash?.slice(0, 12) ?? '—'}…</code>
+                </td>
+                <td>
+                  <StatusBadge status={s.review_status} />
+                  {sla && (
+                    <span className="sla-badge" title="Pending review for more than 48 hours">
+                      ⚠️ SLA BREACH
+                    </span>
                   )}
                 </td>
-              )}
-            </tr>
-          ))}
+                {showReviewDetails && (
+                  <td>
+                    {s.reviewer_id ? (
+                      <>
+                        <strong>{s.reviewer_id}</strong> — {s.review_decision}
+                        {s.review_notes && (
+                          <p className="session-row__notes">{s.review_notes}</p>
+                        )}
+                      </>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                )}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
