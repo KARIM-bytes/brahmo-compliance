@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin, getAuthenticatedContext, requirePartner } from '@/lib/supabase';
 
-// GET — fetch all matter_permissions (partner only, uses admin to bypass RLS)
+// GET — fetch all matter_permissions, all matters, and all non-partner users (partner only, uses admin to bypass RLS)
 export async function GET(req: NextRequest) {
   const context = await getAuthenticatedContext(req);
   if (!context) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -9,12 +9,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Partner role required' }, { status: 403 });
   }
 
-  const { data, error } = await supabaseAdmin
-    .from('matter_permissions')
-    .select('user_id, matter_id, permission_level, granted_by, granted_at');
+  const [permsResult, mattersResult, usersResult] = await Promise.all([
+    supabaseAdmin.from('matter_permissions').select('user_id, matter_id, permission_level, granted_by, granted_at'),
+    supabaseAdmin.from('matters').select('id, matter_name, practice_area').order('id', { ascending: true }),
+    supabaseAdmin.from('users').select('id, name, role').neq('role', 'partner').order('name', { ascending: true }),
+  ]);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ permissions: data ?? [] });
+  if (permsResult.error) return NextResponse.json({ error: permsResult.error.message }, { status: 500 });
+  if (mattersResult.error) return NextResponse.json({ error: mattersResult.error.message }, { status: 500 });
+  if (usersResult.error) return NextResponse.json({ error: usersResult.error.message }, { status: 500 });
+
+  return NextResponse.json({
+    permissions: permsResult.data ?? [],
+    matters:     mattersResult.data ?? [],
+    users:       usersResult.data ?? [],
+  });
 }
 
 // POST — grant a permission

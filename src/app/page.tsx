@@ -88,7 +88,7 @@ export default function Home() {
         const [blockedData, reviewData, permsData] = await Promise.all([
           authFetch('/api/blocked-log').then((r) => readJson<{ events: BlockedAccessEvent[] }>(r)),
           authFetch('/api/review').then((r) => readJson<{ sessions: AiSession[] }>(r)),
-          authFetch('/api/permissions').then((r) => readJson<{ permissions: { user_id: string; matter_id: string; permission_level: string }[] }>(r)),
+          authFetch('/api/permissions').then((r) => readJson<{ permissions: { user_id: string; matter_id: string; permission_level: string }[]; matters: unknown[]; users: unknown[] }>(r)),
         ]);
         setBlockedEvents(blockedData.events);
         setPendingSessions(reviewData.sessions as SessionWithJoins[]);
@@ -326,9 +326,14 @@ export default function Home() {
                     onChange={(e) => setDemoMatterId(e.target.value)}
                     className="grok-select"
                   >
-                    <option value="matter_1">matter_1 / Rajesh Bail</option>
-                    <option value="matter_2">matter_2 / Rajesh Property</option>
-                    <option value="matter_3">matter_3 / TechCorp NDA</option>
+                    {/* Dynamically built from DB — new matters appear automatically */}
+                    {matters.length > 0
+                      ? matters.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.id} / {m.matter_name}
+                          </option>
+                        ))
+                      : <option value="">No accessible matters</option>}
                   </select>
                   <button
                     type="button"
