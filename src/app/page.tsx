@@ -30,6 +30,7 @@ export default function Home() {
   const [pendingSessions, setPendingSessions] = useState<SessionWithJoins[]>([]);
   const [blockedEvents, setBlockedEvents] = useState<BlockedAccessEvent[]>([]);
   const [matters, setMatters] = useState<Matter[]>([]);
+  const [allMatters, setAllMatters] = useState<Matter[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [permissions, setPermissions] = useState<{ user_id: string; matter_id: string; permission_level: string }[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>('sessions');
@@ -73,13 +74,15 @@ export default function Home() {
       const typedProfile = profile as User;
       setCurrentUser(typedProfile);
 
-      const [mattersData, sessionsData, statsData] = await Promise.all([
+      const [mattersData, allMattersData, sessionsData, statsData] = await Promise.all([
         authFetch('/api/matters').then((r) => readJson<{ matters: Matter[] }>(r)),
+        authFetch('/api/matters/all').then((r) => readJson<{ matters: Matter[] }>(r)),
         authFetch('/api/sessions').then((r) => readJson<{ sessions: AiSession[] }>(r)),
         authFetch('/api/stats').then((r) => readJson<{ stats: DashboardStats }>(r)),
       ]);
 
       setMatters(mattersData.matters);
+      setAllMatters(allMattersData.matters);
       setSessions(sessionsData.sessions);
       setStats(statsData.stats);
       setNow(new Date().getTime());
@@ -327,13 +330,13 @@ export default function Home() {
                     className="grok-select"
                   >
                     {/* Dynamically built from DB — new matters appear automatically */}
-                    {matters.length > 0
-                      ? matters.map((m) => (
+                    {allMatters.length > 0
+                      ? allMatters.map((m) => (
                           <option key={m.id} value={m.id}>
                             {m.id} / {m.matter_name}
                           </option>
                         ))
-                      : <option value="">No accessible matters</option>}
+                      : <option value="">No matters in system</option>}
                   </select>
                   <button
                     type="button"
