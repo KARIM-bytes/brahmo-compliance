@@ -70,10 +70,12 @@ export interface ExportSessionRow extends AiSession {
 export interface BlockedAccessEvent {
   event_id: string;
   user_id: string;
+  user_name?: string;           // joined from users table
   attempted_matter_id: string;
   reason: string;
   details: string | null;
   timestamp: string;
+  chain_hash: string | null;    // forensic hash chain
 }
 
 export type AccessResult =
