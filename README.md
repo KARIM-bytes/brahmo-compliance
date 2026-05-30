@@ -1,7 +1,7 @@
 # BRAHMO Compliance Engine
 
 ![Supabase](https://img.shields.io/badge/Supabase-RLS%20Enforced-3ECF8E?style=flat&logo=supabase)
-![Next.js](https://img.shields.io/badge/Next.js-16-black?style=flat&logo=next.js)
+![Next.js](https://img.shields.io/badge/Next.js-14-black?style=flat&logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-Strict-blue?style=flat&logo=typescript)
 ![Compliance](https://img.shields.io/badge/Audit-Tamper--Proof-red?style=flat)
 ![RLS](https://img.shields.io/badge/Access%20Control-Database%20Level-orange?style=flat)
@@ -39,12 +39,12 @@ SELECT * FROM matters WHERE id = 'matter_3';
 → Zero rows. Not an error. Matter doesn't exist for Priya.
 
 -- Try to delete an audit log entry
-DELETE FROM blocked_access_log WHERE event_id = 'block_001';
+DELETE FROM blocked_access_log WHERE id = 'block_001';
 → ERROR: blocked_access_log is append-only
 
 -- Try to edit an audit log entry
-UPDATE blocked_access_log SET reason = 'test' WHERE event_id = 'block_001';
-→ ERROR: blocked_access_log is append-only
+UPDATE blocked_access_log SET reason = 'test' WHERE id = 'block_001';
+→ ERROR: permission denied
 
 -- Try to see Matter 2 as Sonia (same client as Matter 1, different matter)
 SELECT * FROM matters WHERE id = 'matter_2'; -- queried as Sonia
@@ -66,7 +66,7 @@ A CSV with:
 
 ## Tech Stack
 
-- **Frontend:** Next.js 16 (App Router), TypeScript, Vanilla CSS
+- **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS
 - **Database:** Supabase (PostgreSQL) with Row Level Security
 - **Auth:** Demo user switcher (RLS context switching, no OAuth needed)
 - **Export:** Server-side CSV generation with client anonymization
@@ -101,8 +101,8 @@ blocked_access_log → append-only, tamper-proof denial log
 
 **1. Clone the repo**
 ```bash
-git clone https://github.com/KARIM-bytes/p1.git
-cd p1
+git clone https://github.com/KARIM-bytes/brahmo-compliance.git
+cd brahmo-compliance
 ```
 
 **2. Install dependencies**
@@ -193,4 +193,4 @@ VALUES
 
 ## The Money Moment
 
-> Priya queries Matter 3 (TechCorp NDA) → gets **zero rows**. Not an error. Not "access denied." The matter doesn't exist from her perspective. Meanwhile, `blocked_access_log` records the attempt silently in the background. Try `UPDATE blocked_access_log` in SQL editor → **ERROR: blocked_access_log is append-only**. That's the system working exactly as designed.
+> Priya queries Matter 3 (TechCorp NDA) → gets **zero rows**. Not an error. Not "access denied." The matter doesn't exist from her perspective. Meanwhile, `blocked_access_log` records the attempt silently in the background. Try `UPDATE blocked_access_log` in SQL editor → **permission denied**. That's the system working exactly as designed.
