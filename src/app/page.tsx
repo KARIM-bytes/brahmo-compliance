@@ -136,8 +136,8 @@ export default function Home() {
 
     setDemoMessage(
       created.session
-        ? `CLEAR: session ${created.session.id} created and audit trail started.`
-        : 'BLOCKED: session was not created.'
+        ? '✓ Session started — your query has been logged for partner review.'
+        : null
     );
     await fetchData();
   }
