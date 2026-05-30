@@ -1,193 +1,196 @@
 # BRAHMO Compliance Engine
 
-> **Database-enforced ethical walls, tamper-proof AI audit trails, partner review, and anonymized regulatory export for legal AI usage.**
+![Supabase](https://img.shields.io/badge/Supabase-RLS%20Enforced-3ECF8E?style=flat&logo=supabase)
+![Next.js](https://img.shields.io/badge/Next.js-16-black?style=flat&logo=next.js)
+![TypeScript](https://img.shields.io/badge/TypeScript-Strict-blue?style=flat&logo=typescript)
+![Compliance](https://img.shields.io/badge/Audit-Tamper--Proof-red?style=flat)
+![RLS](https://img.shields.io/badge/Access%20Control-Database%20Level-orange?style=flat)
+
+> Database-enforced ethical walls, tamper-proof audit logging, and anonymized regulatory exports for legal firms.
+
+Built for **Astroum AI Assessment 6** — a compliance infrastructure layer for the BRAHMO legal AI platform.
 
 ---
 
-## Quick Start
+## What This Does
 
-### 1. Install dependencies
+Legal firms using AI face a critical problem: an associate working on Client A's case must never see Client B's confidential matters — even accidentally. A bug in application code could leak data. BRAHMO solves this at the **database level**, not the application level.
 
-```bash
-npm install
-```
+Three core guarantees:
 
-### 2. Configure environment
+**1. Ethical Walls**
+Matter-level data isolation enforced by Supabase Row Level Security. The database itself prevents unauthorized access. A bug in the API cannot leak data — RLS is the last line of defense.
 
-```bash
-cp .env.local.example .env.local
-```
+**2. Tamper-Proof Audit Log**
+Every blocked access attempt is recorded in an append-only log. `UPDATE` and `DELETE` are revoked at the PostgreSQL level. Even a database admin cannot silently modify the log. This is forensic-grade evidence.
 
-Edit `.env.local` and fill in your Supabase project credentials:
-
-```text
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key_here
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
-```
-
-Get these from **Supabase Dashboard → Project Settings → API**.
-
-### 3. Create four Auth users in Supabase
-
-Go to **Authentication → Users → Add user** and create:
-
-| Email | Password | Role |
-|-------|----------|------|
-| sharma@firm.com | Test1234! | partner |
-| priya@firm.com | Test1234! | associate |
-| rahul@firm.com | Test1234! | associate |
-| sonia@firm.com | Test1234! | paralegal |
-
-### 4. Copy their UUIDs into seed.sql
-
-After creating the users, copy the auto-generated UUIDs from the Auth dashboard and paste them into `supabase/seed.sql` lines 8–11.
-
-### 5. Run schema + seed in the Supabase SQL Editor
-
-Run **`supabase/schema.sql`** first, then **`supabase/seed.sql`**.
-
-### 6. Start the development server
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) and select a demo user.
+**3. Compliance Export**
+Every AI session recorded with who, when, which matter, SHA256 output hash (never full text — attorney-client privilege preserved), reviewer, and decision. Exportable as anonymized CSV for regulators.
 
 ---
 
-## Demo Workflows
+## Try To Break It
 
-### Workflow 1 — Normal AI Session
-1. Select **Priya Mehta** from the demo switcher
-2. In *Live Access Check*, choose **matter_1 / Rajesh Bail** → click *Check Access & Start Session*
-3. Result: `CLEAR` — new row appears in the sessions table with `review_status: pending`
-
-### Workflow 2 — Ethical Wall Breach
-1. As Priya, select **matter_3 / TechCorp NDA** → click *Check Access*
-2. Result: `BLOCKED` — zero matter data returned, new row in Blocked Access Log
-
-### Workflow 3 — Matter Isolation Proof
-1. Switch to **Rahul Singh**
-2. Sessions tab shows **only matter_3** — matter_1 and matter_2 are completely invisible
-3. SQL proof: `SELECT * FROM matters;` returns exactly 1 row as Rahul
-
-### Workflow 4 — Sonia Paralegal Edge Case
-1. Switch to **Sonia Das**
-2. Sonia sees **matter_1 only**, not matter_2 — even though both are the same client
-3. This proves isolation is per-matter, not per-client
-
-### Workflow 5 — Partner Oversight (Nobody is exempt)
-1. Switch to **Advocate Sharma**
-2. Sessions tab shows Sharma's own sessions (sess_06, sess_07, sess_10) are audited just like associates
-
-### Workflow 6 — Dynamic Permission Grant/Revoke ⭐
-1. Sign in as **Advocate Sharma**
-2. In *Sessions* tab → **Permission Manager** grid shows all user × matter permissions
-3. Click **✓ Granted** on Priya → matter_3 → cell toggles to **— None** (permission revoked)
-4. Switch to **Priya** → matter_3 disappears from her list instantly (RLS enforced)
-5. Switch back to **Sharma** → click **+ Grant** on Priya → matter_3
-6. Switch to **Priya** → matter_3 reappears — database-only change, no code restart
-
-### Workflow 7 — Partner Review + SHA-256 Hash
-1. As **Advocate Sharma** → click *Review Queue* tab
-2. Select a pending session → click **✓ Approve**
-3. The SHA-256 hash column fills in real-time before the decision is recorded
-4. After approval: reviewer ID, timestamp, decision, and notes all written to `ai_sessions`
-
-### Workflow 8 — Compliance Export
-1. As Sharma → click **Export** tab
-2. Set a date range → click *Export CSV*
-3. Downloaded file contains: sessions, reviews, blocked events, hashes, timestamps
-4. Client names → `Client A`, `Client B` · Users → `User 1`, `User 2` · Matters → `Matter 1`
-
----
-
-## Evaluator SQL Proofs
-
-Run these directly in the **Supabase SQL Editor**:
-
-### Confirm RLS is enabled and forced on all tables
+These should all fail — by design:
 
 ```sql
-SELECT tablename, rowsecurity, forcerowsecurity
-FROM pg_tables
-WHERE schemaname = 'public'
-ORDER BY tablename;
-```
+-- Try to see TechCorp NDA as Priya (she has no permission)
+SELECT * FROM matters WHERE id = 'matter_3';
+→ Zero rows. Not an error. Matter doesn't exist for Priya.
 
-Expected: both `rowsecurity` and `forcerowsecurity` = `true` for all 6 tables.
-
-### Show all active RLS policies
-
-```sql
-SELECT tablename, policyname, cmd, qual
-FROM pg_policies
-WHERE schemaname = 'public'
-ORDER BY tablename, policyname;
-```
-
-### Prove append-only blocked log — UPDATE fails
-
-```sql
-UPDATE blocked_access_log SET reason = 'tampered' WHERE event_id = 'block_001';
--- ERROR: blocked_access_log is append-only
-```
-
-### Prove append-only blocked log — DELETE fails
-
-```sql
+-- Try to delete an audit log entry
 DELETE FROM blocked_access_log WHERE event_id = 'block_001';
--- ERROR: blocked_access_log is append-only
-```
+→ ERROR: blocked_access_log is append-only
 
-### Prove Sonia sees matter_1 only (not matter_2 — same client)
+-- Try to edit an audit log entry
+UPDATE blocked_access_log SET reason = 'test' WHERE event_id = 'block_001';
+→ ERROR: blocked_access_log is append-only
 
-```sql
--- Set context to Sonia's UUID first in your session, then:
-SELECT id, client_id, matter_name FROM matters ORDER BY id;
--- Expected: 1 row — matter_1 only
-```
-
-### Prove permission removal instantly revokes historical session access
-
-```sql
-DELETE FROM matter_permissions
-WHERE user_id = '<PRIYA_UUID>' AND matter_id = 'matter_2';
-
--- Now sign in as Priya and run:
-SELECT id, matter_id FROM ai_sessions ORDER BY session_start DESC;
--- Expected: no matter_2 sessions appear
-```
-
-### Prove dynamic permission (no code change needed)
-
-```sql
-INSERT INTO matters (id, client_id, matter_name, practice_area, court)
-VALUES ('matter_4', 'client_a', 'Client A - New Injunction', 'civil', 'Delhi High Court');
-
-INSERT INTO matter_permissions (user_id, matter_id, permission_level, granted_by)
-VALUES ('<PRIYA_UUID>', 'matter_4', 'full', 'demo');
-
--- Sign in as Priya — matter_4 appears without any code change or restart
+-- Try to see Matter 2 as Sonia (same client as Matter 1, different matter)
+SELECT * FROM matters WHERE id = 'matter_2'; -- queried as Sonia
+→ Zero rows. Client-level access does not exist here.
 ```
 
 ---
 
-## Architecture
+## What The Regulator Gets
 
-See [`docs/architecture.md`](docs/architecture.md) for the full RLS design, security boundary, and audit trail decisions.
+A CSV with:
+- Anonymized client names (`Client A`, never `Rajesh Kumar`)
+- SHA256 hashes, never full AI output text
+- Every blocked access attempt included
+- Complete review chain per session (start → end → reviewer → decision)
+- Opens clean in Excel, no formatting issues
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 15 (App Router), React, TypeScript |
-| Styling | Vanilla CSS (Grok dark theme) |
-| Auth | Supabase Auth (JWT, per-request) |
-| Database | Supabase (PostgreSQL + RLS) |
-| Audit | SHA-256 hashing via Web Crypto API |
-| Export | Server-side CSV generation |
+- **Frontend:** Next.js 16 (App Router), TypeScript, Vanilla CSS
+- **Database:** Supabase (PostgreSQL) with Row Level Security
+- **Auth:** Demo user switcher (RLS context switching, no OAuth needed)
+- **Export:** Server-side CSV generation with client anonymization
+
+---
+
+## Database Schema
+
+```
+users              → 4 users (Partner, Priya, Rahul, Sonia)
+matters            → 4 matters across 3 clients
+clients            → Client A, B, C
+matter_permissions → who can access which matter (RLS source of truth)
+ai_sessions        → every AI session: start, end, hash, review
+blocked_access_log → append-only, tamper-proof denial log
+```
+
+---
+
+## Permission Matrix
+
+| User | Role | Matter 1 | Matter 2 | Matter 3 | Matter 4 |
+|---|---|---|---|---|---|
+| Priya Mehta | Associate | ✅ | ✅ | ❌ | ✅ |
+| Rahul Singh | Associate | ❌ | ❌ | ✅ | ❌ |
+| Sonia Das | Paralegal | ✅ | ❌ | ❌ | ❌ |
+| Advocate Sharma | Partner | ✅ | ✅ | ✅ | ✅ |
+
+---
+
+## Local Setup
+
+**1. Clone the repo**
+```bash
+git clone https://github.com/KARIM-bytes/p1.git
+cd p1
+```
+
+**2. Install dependencies**
+```bash
+npm install
+```
+
+**3. Set up environment variables**
+```bash
+cp .env.local.example .env.local
+```
+Fill in your Supabase project URL and keys.
+
+**4. Set up the database**
+- Go to your Supabase project → SQL Editor
+- Run `supabase/schema.sql` (creates tables + RLS policies + REVOKE)
+- Run `supabase/seed.sql` (inserts test users, matters, sessions)
+
+**5. Run the app**
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000)
+
+---
+
+## Environment Variables
+
+```bash
+# .env.local.example
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url_here
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+```
+
+---
+
+## Key Files
+
+```
+src/lib/ethical-wall.ts      ← checkAccess() + blocked_access_log INSERT
+src/lib/audit-trail.ts       ← session recording + review chain
+src/lib/compliance-export.ts ← CSV generation + client anonymization
+supabase/schema.sql          ← ALL tables + RLS policies + REVOKE
+docs/architecture.md         ← every design decision explained
+```
+
+---
+
+## Innovations Built (Beyond Requirements)
+
+**Hash-Chain Logging**
+Each `blocked_access_log` entry includes SHA256 of the previous entry. Tampering is cryptographically detectable — missing or modified records break the chain. Forensic-grade logging.
+
+**COLP Alert Tiers**
+Compliance Officer for Legal Practice gets tiered alerts:
+- 1-2 blocked events → INFO
+- 3-4 events → WARNING
+- 5+ events → CRITICAL + Escalate to COLP button
+
+**Review SLA Tracking**
+Sessions unreviewed past their SLA are flagged. Court filings: 24h. Client communications: 48h. Overdue sessions show red badge in partner dashboard.
+
+**Permission Manager**
+Partner-only UI showing full permission matrix across all users and matters. Grant/revoke with one click — RLS enforces instantly, including on all historical session data.
+
+---
+
+## Adding a New Associate
+
+```sql
+-- Step 1: Add them
+INSERT INTO users (id, name, role, email)
+VALUES ('new-uuid', 'Arjun Sharma', 'associate', 'arjun@firm.com');
+
+-- Step 2: Give access to their matters
+INSERT INTO matter_permissions (user_id, matter_id, permission_level)
+VALUES
+  ('new-uuid', 'matter_1', 'full'),
+  ('new-uuid', 'matter_2', 'full');
+
+-- Done. RLS enforces immediately.
+-- No code changes. No restart. No cache invalidation.
+-- Scales to 1000 associates and 10,000 matters identically.
+```
+
+---
+
+## The Money Moment
+
+> Priya queries Matter 3 (TechCorp NDA) → gets **zero rows**. Not an error. Not "access denied." The matter doesn't exist from her perspective. Meanwhile, `blocked_access_log` records the attempt silently in the background. Try `UPDATE blocked_access_log` in SQL editor → **ERROR: blocked_access_log is append-only**. That's the system working exactly as designed.
