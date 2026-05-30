@@ -36,6 +36,9 @@ export default function UserSwitcher({ currentUserId, currentUserEmail, onSwitch
       console.error('[UserSwitcher] sign-in failed:', error?.message);
       return;
     }
+    // Brief yield — lets Supabase commit the new session to localStorage
+    // before fetchData() calls getSession() inside authFetch.
+    await new Promise((resolve) => setTimeout(resolve, 150));
     onSwitch(data.user.id);
   }
 
