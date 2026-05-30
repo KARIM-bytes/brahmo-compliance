@@ -43,7 +43,8 @@ export default function Home() {
 
   async function fetchData() {
     setLoading(true);
-    setDemoMessage(null);
+    // NOTE: demoMessage is NOT cleared here — it is only cleared at the start
+    // of handleAccessDemo so the result stays visible after data re-fetches.
     try {
       const { data: authData } = await supabase.auth.getUser();
       if (!authData.user) {
@@ -108,18 +109,21 @@ export default function Home() {
     }
   }
 
-  async function handleSwitch() { await fetchData(); }
+  async function handleSwitch() {
+    setDemoMessage(null); // clear old result when switching user
+    await fetchData();
+  }
 
   async function handleAccessDemo() {
-    setDemoMessage(null);
+    setDemoMessage(null); // clear previous result
     const access = await authFetch('/api/access-check', {
       method: 'POST',
       body: JSON.stringify({ matterId: demoMatterId }),
     }).then((r) => readJson<{ status: 'CLEAR' | 'BLOCKED' }>(r));
 
     if (access.status === 'BLOCKED') {
-      setDemoMessage('BLOCKED: no matter details returned; event written to blocked_access_log.');
-      await fetchData();
+      await fetchData(); // refresh data first
+      setDemoMessage('⊘ BLOCKED — matter_3 returned zero rows to Priya. Event logged to blocked_access_log.');
       return;
     }
 
