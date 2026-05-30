@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 
-  const events: BlockedAccessEvent[] = ((data ?? []) as RawBlockedRow[]).map((row) => ({
+  const events: BlockedAccessEvent[] = ((data ?? []) as unknown as RawBlockedRow[]).map((row) => ({
     event_id:             row.event_id,
     user_id:              row.user_id,
     user_name:            row.users?.name,

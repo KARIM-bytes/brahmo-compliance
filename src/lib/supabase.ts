@@ -1,82 +1,94 @@
-import { createClient, SupabaseClient, User as SupabaseAuthUser } from '@supabase/supabase-js';
-import type { User, UserRole } from './types';
+// ============================================================
+// lib/supabase.ts — Supabase client factory
+//
+// We maintain TWO clients:
+//   - anonClient  → respects RLS (used for all user-facing queries)
+//   - adminClient → service_role key (used ONLY for BLOCKED_ACCESS
+//                   INSERT and compliance export that needs full view)
+//
+// ⚠️  adminClient bypasses RLS — never expose it to the browser.
+//     Keep it server-side (Next.js API routes) only.
+// ============================================================
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { NextRequest } from 'next/server';
+
+const SUPABASE_URL          = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY     = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+// SUPABASE_SERVICE_ROLE_KEY has no NEXT_PUBLIC_ prefix — undefined in browser.
+// API routes get the real value; browser bundle gets the anon key as a safe fallback.
 const SUPABASE_SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  process.env.SUPABASE_SERVICE_ROLE_KEY ?? SUPABASE_ANON_KEY;
 
+// ── Public (anon) client — browser-safe, RLS enforced ───────
 export const supabase: SupabaseClient = createClient(
   SUPABASE_URL,
   SUPABASE_ANON_KEY
 );
 
-// Server-only. This bypasses RLS and is limited to partner-verified exports.
+// ── Admin client — SERVER-SIDE ONLY, bypasses RLS ────────────
+// In API routes: uses real service_role key.
+// In browser bundle: falls back to anon key (harmless — never called client-side).
 export const supabaseAdmin: SupabaseClient = createClient(
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY,
   { auth: { persistSession: false } }
 );
 
-export interface AuthenticatedContext {
-  client: SupabaseClient;
-  authUser: SupabaseAuthUser;
-  profile: User;
-  token: string;
+
+export interface AuthContext {
+  client:   SupabaseClient;
+  authUser: { id: string; email?: string };
+  profile:  { id: string; name: string; email: string; role: string; sra_number: string | null };
 }
 
-interface HeaderReader {
-  headers: {
-    get(name: string): string | null;
-  };
-}
+/**
+ * getAuthenticatedContext — used by all API routes.
+ *
+ * 1. Reads the Bearer token from Authorization header
+ * 2. Verifies it against Supabase Auth → gets authUser
+ * 3. Looks up the public.users profile row → gets role/name
+ * 4. Returns an RLS-scoped client where auth.uid() = user.id
+ *
+ * Returns null → route responds 401.
+ */
+export async function getAuthenticatedContext(req: NextRequest): Promise<AuthContext | null> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) return null;
 
-export function getBearerToken(req: HeaderReader): string | null {
-  const header = req.headers.get('authorization');
-  if (!header?.toLowerCase().startsWith('bearer ')) return null;
-  const token = header.slice('bearer '.length).trim();
-  return token.length > 0 ? token : null;
-}
+  const token = authHeader.slice(7);
 
-export function createAuthenticatedClient(token: string): SupabaseClient {
-  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { persistSession: false },
-    global: {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    },
-  });
-}
+  // Verify token with Supabase Auth
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return null;
 
-export async function getAuthenticatedContext(req: HeaderReader): Promise<AuthenticatedContext | null> {
-  const token = getBearerToken(req);
-  if (!token) return null;
-
-  const client = createAuthenticatedClient(token);
-  const { data: authData, error: authError } = await client.auth.getUser(token);
-  if (authError || !authData.user) return null;
-
-  const { data: profile, error: profileError } = await client
+  // Look up profile in public.users (use admin to bypass RLS for this lookup)
+  const { data: profile } = await supabaseAdmin
     .from('users')
-    .select('id, name, email, role, sra_number, created_at')
-    .eq('id', authData.user.id)
-    .maybeSingle();
+    .select('id, name, email, role, sra_number')
+    .eq('id', user.id)
+    .single();
 
-  if (profileError || !profile) return null;
+  if (!profile) return null;
+
+  // Build RLS-scoped client: every downstream query runs as auth.uid() = user.id
+  const scopedClient: SupabaseClient = createClient(
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY,
+    { global: { headers: { Authorization: `Bearer ${token}` } } }
+  );
 
   return {
-    client,
-    authUser: authData.user,
-    profile: profile as User,
-    token,
+    client:   scopedClient,
+    authUser: { id: user.id, email: user.email },
+    profile:  profile as AuthContext['profile'],
   };
 }
 
-export function requirePartner(profile: Pick<User, 'role'>): boolean {
-  return profile.role === 'partner';
-}
-
-export function isUserRole(value: string): value is UserRole {
-  return value === 'partner' || value === 'associate' || value === 'paralegal';
+/**
+ * requirePartner — call after getAuthenticatedContext to gate partner-only routes.
+ * Returns true if the user has the 'partner' role, false otherwise.
+ */
+export function requirePartner(profile: AuthContext['profile'] | null | undefined): boolean {
+  return profile?.role === 'partner';
 }

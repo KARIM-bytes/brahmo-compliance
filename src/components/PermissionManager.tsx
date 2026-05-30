@@ -224,7 +224,7 @@ export default function PermissionManager({ currentPermissions, onUpdate }: Perm
                             padding: '5px 14px', borderRadius: '9999px',
                             fontSize: '.72rem', fontWeight: 700,
                             cursor: busy ? 'not-allowed' : 'pointer',
-                            border: 'none', transition: 'all .2s',
+                            transition: 'all .2s',
                             opacity: busy ? .5 : 1,
                             ...(granted
                               ? { background: 'rgba(0,255,159,.12)', color: 'var(--accent)', border: '1px solid rgba(0,255,159,.3)' }

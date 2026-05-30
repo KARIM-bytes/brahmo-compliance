@@ -43,12 +43,9 @@ export default function Home() {
 
   async function fetchData() {
     setLoading(true);
-    // NOTE: demoMessage is NOT cleared here — it is only cleared at the start
-    // of handleAccessDemo so the result stays visible after data re-fetches.
     try {
       const { data: authData } = await supabase.auth.getUser();
       if (!authData.user) {
-        setCurrentUser(null);
         setSessions([]);
         setPendingSessions([]);
         setBlockedEvents([]);
@@ -56,7 +53,9 @@ export default function Home() {
         setStats(null);
         return;
       }
+
       await supabase.auth.refreshSession();
+
       const { data: profile, error: profileError } = await supabase
         .from('users')
         .select('id, name, email, role, sra_number, created_at')
@@ -64,7 +63,7 @@ export default function Home() {
         .maybeSingle();
 
       if (profileError) {
-        console.error('[fetchData] Profile query error:', profileError.message, profileError.code);
+        console.error('[fetchData] Profile query error:', profileError.message);
         throw new Error(`Profile query failed: ${profileError.message}`);
       }
       if (!profile) {
